@@ -1,6 +1,6 @@
 # Gaussian Process Boosting (GPBoost) Discovery
 
-This repository explores the integration of **Gaussian Processes (GP)** with **Gradient Boosting Decision Trees (GBDT)**, specifically focusing on the **GPBoost** framework. The project aims to understand how structured variance—such as individual differences in biological data—can be accounted for in predictive modeling.
+This repository explores the integration of **Gaussian Processes (GP)** with **Gradient Boosting Decision Trees (GBDT)**, specifically focusing on the **GPBoost** framework. The project aims to understand how structured variance—such as individual differences in biological data—can be accounted for in predictive modeling. This repo applies the ideas of the paper of Sigrist (2022).
 
 ## Project Motivation
 In many real-world datasets, observations are not truly independent. For instance, multiple samples might come from the same individual, introducing a "grouping" effect or "random effect." Standard boosting algorithms (like XGBoost or LightGBM) often struggle with this grouped structure because they assume independence between rows.
