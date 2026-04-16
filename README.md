@@ -1,36 +1,40 @@
-# Gaussian Process Boosting (GPBoost) Discovery
+# GPBoost: Structured Variance in Cortisol Prediction
 
-This repository explores the integration of **Gaussian Processes (GP)** with **Gradient Boosting Decision Trees (GBDT)**, specifically focusing on the **GPBoost** framework. The project aims to understand how structured variance—such as individual differences in biological data—can be accounted for in predictive modeling. This repo applies the ideas of the paper of Sigrist (2022).
+An experiment comparing naive gradient boosting against **GPBoost** (Sigrist, 2022) on synthetic longitudinal cortisol data with grouped random effects.
 
-## Project Motivation
-In many real-world datasets, observations are not truly independent. For instance, multiple samples might come from the same individual, introducing a "grouping" effect or "random effect." Standard boosting algorithms (like XGBoost or LightGBM) often struggle with this grouped structure because they assume independence between rows.
+## Motivation
 
-This repository documents an experiment using synthetic data to compare:
-1.  **Naive Boosting:** How well does a standard GBDT perform when ignoring the grouping variable?
-2.  **GPBoost:** How does a model that explicitly accounts for structured variance perform, especially when predicting for individuals not seen during training?
+Standard GBDTs (LightGBM, XGBoost) assume row independence. When observations are grouped — e.g., repeated measurements per person — individual-level baseline shifts become unexplained noise. GPBoost combines GBDTs with Gaussian Processes to explicitly model this structured variance.
 
-## The Experiment: Cortisol Level Prediction
-The synthetic dataset simulates **Cortisol levels** based on:
--   **Typical Parameters:** Continuous and categorical features (e.g., time of day, stress markers, age).
--   **The Hidden Factor:** A grouping variable representing the **Donor (Person)**. Each donor has a unique baseline shift or "random effect" that influences their cortisol levels beyond the global features.
+## Experiment
 
-### Phase 1: Naive Boosting
-We first train a standard boosting model on the synthetic data. 
--   **The Challenge:** The model is not given the donor ID. 
--   **Goal:** To establish a baseline and see how much error is introduced by "unexplained" variance that is actually tied to the individual donor.
+Synthetic cortisol data is generated from a hierarchical model:
 
-### Phase 2: GPBoost & Structured Variance
-We then utilize the **GPBoost** library. This approach allows us to combine the non-linear mapping capabilities of GBDTs with a Gaussian Process to model the grouped structure.
+```
+y_ij = f(x_ij) + b_i + ε_ij
+```
 
--   **Grouped Random Effects:** GPBoost accounts for the specific variance attributed to each donor.
--   **Extrapolation via Kernels:** A key interest is the use of the **RBF (Radial Basis Function) Kernel**. This allows the model to make informed predictions even for *new persons* not present in the training set, by leveraging similarity in the latent space.
+- **f(x)** — fixed effects: diurnal rhythm, stress, sleep, age
+- **b_i ~ N(0, σ²_b)** — per-donor random effect (the structured variance)
+- **ε_ij ~ N(0, σ²_ε)** — residual noise
 
-## Key Goals
--   [ ] Generate synthetic longitudinal/grouped cortisol data.
--   [ ] Benchmark LightGBM/XGBoost against the grouped data.
--   [ ] Implement GPBoost with a grouping factor.
--   [ ] Evaluate performance on "unseen" donors to test the GP kernel's generalization.
+Two models are compared:
+
+| Model | Sees donor ID | Handles unseen donors |
+|---|---|---|
+| Naive GBDT | ✗ | ✗ |
+| GPBoost | ✓ (grouped RE) | ✓ (RBF kernel) |
+
+Performance is evaluated separately on **seen vs. unseen donors** — the split where GPBoost's GP kernel is expected to show the clearest advantage.
+
+## Goals
+
+- [ ] Generate synthetic grouped cortisol data
+- [ ] Benchmark LightGBM against grouped data
+- [ ] Implement GPBoost with grouped random effects
+- [ ] Evaluate GP kernel generalization on held-out donors
 
 ## References
--   Sigrist, F. (2022). [GPBoost Python Package](https://github.com/pfriedrich/GPBoost).
--   Sigrist, F. (2020). "Gaussian Process Boosting". *Journal of Machine Learning Research*.
+
+- Sigrist, F. (2022). [GPBoost Python Package](https://github.com/pfriedrich/GPBoost)
+- Sigrist, F. (2020). Gaussian Process Boosting. *Journal of Machine Learning Research*
