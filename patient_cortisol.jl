@@ -7,8 +7,17 @@ using InteractiveUtils
 # ╔═╡ a93795c0-38e3-11f1-bfa9-8182dfeb44b1
 using Pkg; Pkg.activate(".")
 
+# ╔═╡ 05d81ba8-8ba3-44e8-8624-2773438b5944
+Pkg.add("XLSX")
+
+# ╔═╡ 6468d1fa-9186-4267-95ab-dd0b493429ac
+using XLSX
+
 # ╔═╡ a6aa8b59-54d8-4879-bce7-1e20f5407b1b
 using StatsPlots, PlutoUI; TableOfContents()
+
+# ╔═╡ 8bd1c120-9758-4ae6-bea9-e8bb80e2f64b
+using MLJ; using EvoTrees
 
 # ╔═╡ ebaf341f-398d-4cbf-8bd5-1e5e50015d01
 using DataFrames
@@ -114,7 +123,7 @@ end
 end
 
 # ╔═╡ a9a608ba-fcc4-4055-a4b7-b56a9fcb673d
-function make_patient_data(n_obs::Int = 10)
+function make_patient_data(n_obs::Int = 20)
     person_model  = generate_person()
     person_chain  = sample(person_model, Prior(), 1)
     person_params = generated_quantities(person_model, person_chain) |> only
@@ -169,18 +178,180 @@ md"""
 # ╔═╡ 19891b42-8de5-4d93-9a02-bf1615a7fae6
 md"""
 - 100 donors
-- each 10 samples
+- each 20 samples
 """
 
 # ╔═╡ fedf5271-4dd6-4bf0-b088-aec5e926c110
 df = make_dataset(100)
 
 # ╔═╡ a6adcb1d-0377-45c1-abac-62de256be97c
-df[1, :]
+begin
+    ids = unique(df.patient_id)
+    cortisol_groups = [df[df.patient_id .== id, :cortisol] for id in ids]
+    
+    violin(
+        repeat(ids, inner=10),  # x-axis: patient id repeated for each observation
+        df.cortisol,
+        group  = df.patient_id,
+        xlabel = "Patient ID",
+        ylabel = "Cortisol (µg/dL)",
+        title  = "Cortisol distribution per patient",
+        legend = false,
+        linewidth = 0.5,
+        fillalpha = 0.7,
+    )
+end
+
+# ╔═╡ 6a871e56-662c-4e5d-ae77-0a09f8bb7729
+begin
+    physical_groups = [df[df.patient_id .== id, :physical_activity] for id in ids]
+    
+    violin(
+        repeat(ids, inner=10),  # x-axis: patient id repeated for each observation
+        df.physical_activity,
+        group  = df.patient_id,
+        xlabel = "Patient ID",
+        ylabel = "Cortisol (µg/dL)",
+        title  = "Physical activity per patient",
+        legend = false,
+        linewidth = 0.5,
+        fillalpha = 0.7,
+    )
+end
+
+# ╔═╡ 059f3bc1-580a-4eb2-a7d5-ebb4e6996119
+begin
+	# Select only numeric columns and convert to matrix
+	numeric_cols = [:cortisol, :hours_since_waking, :time_of_day, 
+	                :sleep_duration, :physical_activity, :food_intake]
+	
+	corrplot(Matrix(df[:, numeric_cols]), 
+	         label = string.(numeric_cols),
+	         size  = (900, 900))
+end
+
+# ╔═╡ aab60acb-dfe6-471c-9d62-c175c1a72a3d
+XLSX.writetable("my_data.xlsx", "Sheet1" => df)
+
+# ╔═╡ 2515e9d0-e69a-4c75-ace7-7ce981761d4e
+md"""
+## Train & Test data
+"""
+
+# ╔═╡ 4f0640f2-7a39-4d7d-9884-2ea6a5a58867
+names(df)
+
+# ╔═╡ 703b7440-189b-45f3-bc89-1adf401cb854
+begin
+	X = df[:,[:hours_since_waking, :time_of_day, :sleep_duration, 	:physical_activity, :food_intake, :caffeine_intake]]
+	y = df.cortisol
+	train_idx, test_idx = partition(eachindex(y), 0.8, shuffle=true)
+
+	X_train = X[train_idx, :]
+	X_test = X[test_idx, :]
+
+	y_train = y[train_idx]
+	y_test = y[test_idx]
+end;
+
+# ╔═╡ 8384f35b-d92f-494d-8178-9169d88516ef
+md"""
+# Fitting a model
+"""
+
+# ╔═╡ 1cbaab8d-a39e-4370-90a3-fda556229b6d
+begin
+	Booster = @load EvoTreeRegressor # loads code defining a model type
+	booster = Booster()   # specify hyper-parameter at construction
+end
+
+# ╔═╡ 442db0fc-e5d6-40ac-bbe2-2595a0de9a96
+begin
+	# Wrap the model and data in a machine:
+	mach = machine(booster, X_train, y_train)
+	
+	# Fit the machine:
+	fit!(mach)
+	
+	# Get training predictions:
+	yhat = MLJ.predict(mach, X_test)
+end
+
+# ╔═╡ b770e49e-8159-41b5-80bf-e39d2b503eca
+evaluate!(
+    mach,
+    resampling=CV(nfolds=5),
+    measures=[rmse],
+)
+
+# ╔═╡ 2d5b22a2-ac86-4733-a959-33d4cab28c7d
+begin
+	scatter(y_test, yhat, xlims = (0, 50), ylims = (0, 50), label = "Prediction")
+	plot!(1:1:50, label = "Perfect prediction")
+end
+
+# ╔═╡ 0db89ed8-0d44-42ba-a4a5-d3bb9646447c
+md"""
+## Hyperparametertuning
+"""
+
+# ╔═╡ b3cbf83f-4bff-4afa-a1a1-92f97569fc3b
+begin
+	# Define a hyperparameter range:
+	r1 = range(booster, :max_depth, lower=1, upper=10) # values=[2, 3, 4, 6]
+	r2 = range(booster, :eta, lower=0.01, upper=0.3)
+	
+	r_row = range(booster, :rowsample, lower=0.5, upper=1.0)
+	r_col = range(booster, :colsample, lower=0.5, upper=1.0)
+	
+	# Create self-tuning version of model:
+	tuned_booster = TunedModel(
+	    booster, range=[r1, r2, r_row, r_col], tuning=Grid(resolution = 4), measure=rms, resampling=CV(nfolds=3))
+	
+	# Train the wrapped model:
+	mach_b = machine(tuned_booster, X_train, y_train) |> fit!
+	
+	# Predict using optimal model:
+	yhat_best = MLJ.predict(mach_b, X_test)
+	
+	# Inspect the best model:
+	booster_best = fitted_params(mach_b).best_model
+end
+
+# ╔═╡ b10cf869-ea7d-4ee4-b27b-cebaa3ec805e
+fitted_params(mach_b).best_model
+
+# ╔═╡ 6dc318c3-4843-4e50-b280-19beca8e767c
+plot(mach_b)
+
+# ╔═╡ e6a8f012-4ca3-47bb-af5c-9622f599c44e
+entry = report(mach_b).best_history_entry
+
+# ╔═╡ 08e7d824-5b9a-4a86-991c-447eacfa1db5
+begin
+	entry.model.max_depth
+	entry.model.eta
+end
+
+# ╔═╡ 1ae64568-bb6d-4408-a720-34bd729259a8
+evaluate!(
+    mach_b,
+    resampling=CV(nfolds=3),
+    measures=[rmse],
+)
+
+# ╔═╡ 40b98162-b37d-4f64-b217-1727274e2729
+begin
+	scatter(y_test, yhat_best, xlims = (0, 50), ylims = (0, 50), label = "Prediction", ylabel = "Prediction", xlabel = "True")
+	plot!(1:1:50, label = "Perfect prediction")
+end
 
 # ╔═╡ Cell order:
 # ╠═a93795c0-38e3-11f1-bfa9-8182dfeb44b1
+# ╠═05d81ba8-8ba3-44e8-8624-2773438b5944
+# ╠═6468d1fa-9186-4267-95ab-dd0b493429ac
 # ╠═a6aa8b59-54d8-4879-bce7-1e20f5407b1b
+# ╠═8bd1c120-9758-4ae6-bea9-e8bb80e2f64b
 # ╠═ebaf341f-398d-4cbf-8bd5-1e5e50015d01
 # ╠═34b2988f-3ae5-4de8-9336-5c250a783e5d
 # ╠═e2972627-9b5f-4038-8ba9-621658c06b30
@@ -193,3 +364,22 @@ df[1, :]
 # ╟─19891b42-8de5-4d93-9a02-bf1615a7fae6
 # ╠═fedf5271-4dd6-4bf0-b088-aec5e926c110
 # ╠═a6adcb1d-0377-45c1-abac-62de256be97c
+# ╠═6a871e56-662c-4e5d-ae77-0a09f8bb7729
+# ╠═059f3bc1-580a-4eb2-a7d5-ebb4e6996119
+# ╠═aab60acb-dfe6-471c-9d62-c175c1a72a3d
+# ╟─2515e9d0-e69a-4c75-ace7-7ce981761d4e
+# ╠═4f0640f2-7a39-4d7d-9884-2ea6a5a58867
+# ╠═703b7440-189b-45f3-bc89-1adf401cb854
+# ╟─8384f35b-d92f-494d-8178-9169d88516ef
+# ╠═1cbaab8d-a39e-4370-90a3-fda556229b6d
+# ╠═442db0fc-e5d6-40ac-bbe2-2595a0de9a96
+# ╠═b770e49e-8159-41b5-80bf-e39d2b503eca
+# ╠═2d5b22a2-ac86-4733-a959-33d4cab28c7d
+# ╟─0db89ed8-0d44-42ba-a4a5-d3bb9646447c
+# ╠═b3cbf83f-4bff-4afa-a1a1-92f97569fc3b
+# ╠═b10cf869-ea7d-4ee4-b27b-cebaa3ec805e
+# ╠═6dc318c3-4843-4e50-b280-19beca8e767c
+# ╠═e6a8f012-4ca3-47bb-af5c-9622f599c44e
+# ╠═08e7d824-5b9a-4a86-991c-447eacfa1db5
+# ╠═1ae64568-bb6d-4408-a720-34bd729259a8
+# ╠═40b98162-b37d-4f64-b217-1727274e2729
